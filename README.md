@@ -127,7 +127,8 @@ Rotte disponibili:
 | --- | --- |
 | `/auth/login` | Form di accesso (email + password) |
 | `/auth/sign-up` | Form di registrazione (email + password + conferma) |
-| `/auth/callback` | Scambio del codice di conferma arrivato via email con una sessione, poi redirect a `/` |
+| `/auth/confirm` | **Percorso consigliato di conferma email (SSR)**: verifica `token_hash` + `type` con `verifyOtp`, poi redirect a `/` |
+| `/auth/callback` | Fallback retro-compatibile per i link PKCE `?code=` (scambio codice → sessione) |
 | `/auth/sign-out` | Solo `POST`: chiude la sessione e reindirizza a `/` (`GET` risponde `405`) |
 
 Come è costruita:
@@ -152,20 +153,54 @@ Come è costruita:
   `user_metadata` per decisioni di sicurezza (sarebbe modificabile dall'utente): quando servirà,
   i dati di autorizzazione andranno in `app_metadata` e le policy RLS verificheranno `auth.uid()`.
 
+### Conferma email (flusso consigliato SSR)
+
+Il link di conferma deve puntare a **`/auth/confirm`** con un token hash, non allo scambio codice:
+
+```
+{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email
+```
+
+`app/auth/confirm/route.ts` accetta solo i tipi di conferma email (`email`, `signup`), chiama
+`supabase.auth.verifyOtp({ type, token_hash })` con il client SSR e reindirizza solo a percorsi
+interni fissi (`/` in caso di successo, `/auth/login?errore=link` in caso di fallimento). Il token non
+viene mai mostrato, registrato o rimesso nella URL: non ci sono redirect aperti.
+
+Perché serve: lo scambio `?code=` di `/auth/callback` richiede il *code verifier* PKCE salvato nel
+browser che ha iniziato la registrazione. Aprendo l'email da un altro browser, da un altro dispositivo
+o dal browser in-app di un provider di posta, quel verificatore non c'è → Supabase risponde `400` su
+`/token` e l'utente vede “Il link di conferma non è valido o è scaduto.” La verifica con `token_hash`
+non dipende da nessuno stato salvato nel browser, quindi funziona in tutti questi casi.
+`/auth/callback` resta attivo solo come fallback per i link vecchi: nessuna rottura per chi ha ancora
+il template precedente.
+
+**Azione manuale richiesta (non automatizzabile da qui):**
+
+1. Supabase Dashboard → **Authentication → Email Templates → Confirm signup**: imposta il link a
+   `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`.
+2. **Authentication → URL Configuration**: imposta il **Site URL** all'origine pubblica
+   (in produzione `https://<dominio>`, in locale `http://localhost:3000`) e aggiungi
+   `https://<dominio>/**` (e `http://localhost:3000/**`) agli URL di reindirizzamento. `{{ .SiteURL }}`
+   è il Site URL del progetto: se è sbagliato, la conferma fallisce.
+
+Nessuna migrazione SQL può modificare i template email o il Site URL: è una verifica manuale.
+
 ### Impostazioni Supabase Auth da verificare
 
 Il comportamento dipende dalla configurazione del progetto (Dashboard → Authentication):
 
 1. Provider **Email** attivo (`Authentication → Providers → Email`).
 2. **Conferma email**: se è richiesta (impostazione predefinita consigliata), dopo la registrazione
-   l'utente deve aprire il link ricevuto e viene reindirizzato su `/auth/callback`; se non lo è, la
-   sessione parte subito. L'app gestisce entrambi i casi con messaggi diversi — non disattivare la
-   conferma solo per comodità, perché indebolisce gli account.
+   l'utente deve aprire il link ricevuto e viene reindirizzato su `/auth/confirm` (vedi la sezione
+   sopra); il fallback `/auth/callback` copre i template che usano ancora `{{ .ConfirmationURL }}`.
+   Se la conferma non è richiesta, la sessione parte subito. L'app gestisce entrambi i casi con
+   messaggi diversi — non disattivare la conferma solo per comodità, perché indebolisce gli account.
 3. **URL di reindirizzamento**: `Authentication → URL Configuration` deve includere
-   `http://localhost:3000/**` in sviluppo e `https://<dominio>/auth/callback` in produzione. Il link
-   di conferma usa `NEXT_PUBLIC_SITE_URL` + `/auth/callback` (vedi sopra) e Supabase rifiuta URL non
-   in allow list; senza `NEXT_PUBLIC_SITE_URL` valgono il Site URL e i redirect predefiniti del
-   progetto.
+   `http://localhost:3000/**` in sviluppo e `https://<dominio>/**` in produzione (in particolare
+   `/auth/confirm` e `/auth/callback`). Il link di conferma usa `{{ .SiteURL }}` dal template, quindi
+   il **Site URL** deve essere l'origine pubblica corretta; Supabase rifiuta URL non in allow list.
+   Anche `NEXT_PUBLIC_SITE_URL` + `/auth/callback` resta il redirect usato dalla registrazione (vedi
+   sopra) e senza `NEXT_PUBLIC_SITE_URL` valgono il Site URL e i redirect predefiniti del progetto.
 4. **Rate limit email**: il piano gratuito invia poche email all'ora; in caso di superamento la UI
    mostra “Abbiamo inviato troppe email: riprova tra qualche minuto.”
 5. Password: minimo 8 caratteri imposto anche lato app. Se l'app deve rispettare i requisiti esterni
@@ -250,7 +285,7 @@ mostrato o registrato. Nessuna scrittura, nessuna chiave `service_role`.
 app/                    layout, homepage, globals.css (token RawBlock), loading
 app/api/search/         route GET /api/search (JSON, server-only)
 app/songs/[mbid]/       scheda brano: page, loading, not-found, actions (classify_song)
-app/auth/               pagine login/sign-up, Server Functions, callback e sign-out
+app/auth/               pagine login/sign-up, Server Functions, conferma (confirm), callback e sign-out
 components/             pannello consenso + loader analytics, form di autenticazione,
                         form di classificazione
 lib/                    consenso, provider MusicBrainz (server-only: ricerca + lookup),

@@ -5,7 +5,10 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ANALYTICS_CONSENT_CHANGE_EVENT,
   ANALYTICS_CONSENT_OPEN_EVENT,
+  effectiveConsent,
+  isConsentBannerVisible,
   readConsent,
+  shouldLoadAnalytics,
   writeConsent,
   type ConsentChoice,
 } from "@/lib/consent";
@@ -17,6 +20,11 @@ import {
  * useSyncExternalStore: the server snapshot is "no choice yet", so the
  * server-rendered HTML matches the first client render and analytics is never
  * part of the initial document. Unknown consent means denied.
+ *
+ * A click also records the decision in local state, so the panel closes on the
+ * spot instead of waiting for the store round-trip — that round-trip never
+ * happens when localStorage is unavailable, which used to leave the banner on
+ * screen after "Accetta".
  */
 function subscribeToConsent(onStoreChange: () => void) {
   window.addEventListener(ANALYTICS_CONSENT_CHANGE_EVENT, onStoreChange);
@@ -27,13 +35,38 @@ function subscribeToConsent(onStoreChange: () => void) {
   };
 }
 
-const clientConsent = () => readConsent(window.localStorage);
+/**
+ * Reading `window.localStorage` itself throws in some privacy modes (blocked or
+ * partitioned storage), before any `getItem`/`setItem` runs. Returning null is
+ * the fail-closed path: unknown consent, no analytics.
+ */
+function safeStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+const clientConsent = () => readConsent(safeStorage());
 const serverConsent = () => null;
 
 export function AnalyticsConsent() {
-  const choice = useSyncExternalStore(subscribeToConsent, clientConsent, serverConsent);
+  const stored = useSyncExternalStore(subscribeToConsent, clientConsent, serverConsent);
+  const [decided, setDecided] = useState<ConsentChoice | null>(null);
   const [reopened, setReopened] = useState(false);
   const panel = useRef<HTMLElement>(null);
+
+  const choice = effectiveConsent(stored, decided);
+
+  useEffect(() => {
+    // Only another tab fires `storage`: it means the choice changed elsewhere, so
+    // the local override is dropped and the store takes over again. (Our own
+    // change dispatches a different event and keeps its override.)
+    const onExternalChange = () => setDecided(null);
+    window.addEventListener("storage", onExternalChange);
+    return () => window.removeEventListener("storage", onExternalChange);
+  }, []);
 
   useEffect(() => {
     const reopen = () => setReopened(true);
@@ -46,16 +79,20 @@ export function AnalyticsConsent() {
   }, [reopened]);
 
   function decide(next: ConsentChoice) {
-    writeConsent(window.localStorage, next);
+    // Immediate UI transition, independent of the store round-trip…
+    setDecided(next);
     setReopened(false);
+    // …then persist, best effort and fail-closed: a storage failure never throws
+    // and simply means the next page load starts from "unknown" (denied) again.
+    writeConsent(safeStorage(), next);
     window.dispatchEvent(new Event(ANALYTICS_CONSENT_CHANGE_EVENT));
   }
 
-  const visible = choice === null || reopened;
+  const visible = isConsentBannerVisible(choice, reopened);
 
   return (
     <>
-      {choice === "granted" ? <Analytics mode="production" /> : null}
+      {shouldLoadAnalytics(choice) ? <Analytics mode="production" /> : null}
 
       {visible ? (
         <section
