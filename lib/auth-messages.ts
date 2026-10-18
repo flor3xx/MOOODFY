@@ -16,7 +16,7 @@ export const NOT_CONFIGURED_MESSAGE =
   "Supabase non è configurato su questo ambiente: l'accesso non è disponibile. Vedi il README.";
 
 export const SIGN_UP_PENDING_MESSAGE =
-  "Ti abbiamo inviato un'email di conferma: apri il link per attivare l'account. Se l'indirizzo è già registrato, prova invece ad accedere.";
+  "Ti abbiamo inviato un'email di conferma. Con il flusso email predefinito, apri il link entro pochi minuti nello stesso browser e dispositivo usati per registrarti. Se l'indirizzo è già registrato, prova invece ad accedere.";
 
 /**
  * Maps provider error codes to safe, fixed messages. The raw provider message

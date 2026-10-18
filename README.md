@@ -147,6 +147,9 @@ Come è costruita:
   cache insieme ai cookie di sessione.
 - Errori del provider mappati su messaggi fissi (`lib/auth-messages.ts`): nessun testo grezzo di
   Supabase arriva al client.
+- **Password**: la Server Function la invia a Supabase Auth senza registrarla o salvarla nelle
+  tabelle dell'app. Supabase Auth conserva solo un hash bcrypt con salt casuale in
+  `auth.users.encrypted_password`; MOOODFY non può leggere una password in chiaro.
 - Nessun evento analytics viene inviato per l'autenticazione e nessun indirizzo email viene passato
   a Vercel Analytics. Il consenso analytics resta invariato e indipendente dall'account.
 - **Nessuna autorizzazione in questo slice:** non esistono ruoli o dati protetti. Non si usa
