@@ -11,7 +11,7 @@
  * rendered: the caller only ever sees `remote` or a reason from a closed union.
  */
 
-import { DIMENSIONS, mapDimensions, type Dimension } from "./dimensions";
+import { DIMENSIONS, mapDimensionValueIds, mapDimensions, type Dimension } from "./dimensions";
 import { createServerSupabaseClient } from "./supabase/server";
 
 /** Why the read fell back to the local vocabulary. */
@@ -69,5 +69,38 @@ export async function loadDimensions(): Promise<DimensionLoad> {
     return mapped ? { source: "remote", dimensions: mapped } : fallback("unusable");
   } catch {
     return fallback("query_failed");
+  }
+}
+
+/**
+ * Resolves "dimension slug -> value label -> dimension_values.id" from the same
+ * public reference tables, in read-only mode. Used when submitting a
+ * classification, so the app sends database ids rather than trusting anything
+ * the browser posted. Returns null when Supabase is not configured, the read
+ * fails, or the answer holds no usable values.
+ */
+export async function loadDimensionValueIds() {
+  let supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>;
+  try {
+    supabase = await createServerSupabaseClient();
+  } catch {
+    return null;
+  }
+  if (!supabase) return null;
+
+  try {
+    const [dimensions, values] = await Promise.all([
+      supabase.from("dimensions").select("id,slug").order("sort_order").limit(ROW_LIMIT),
+      supabase
+        .from("dimension_values")
+        .select("id,dimension_id,value")
+        .order("sort_order")
+        .limit(ROW_LIMIT),
+    ]);
+
+    if (dimensions.error || values.error) return null;
+    return mapDimensionValueIds(dimensions.data, values.data);
+  } catch {
+    return null;
   }
 }

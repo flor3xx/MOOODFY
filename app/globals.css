@@ -513,6 +513,64 @@ main {
   margin-top: var(--rb-sp-2);
 }
 
+/* ---------- song detail ---------- */
+
+.crumb {
+  font-family: var(--rb-font-mono);
+  font-size: var(--rb-size-small);
+  margin-top: var(--rb-sp-2);
+}
+
+.crumb + h1,
+.crumb + section h1 {
+  margin-top: var(--rb-sp-2);
+}
+
+.detail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rb-sp-3) var(--rb-sp-5);
+  margin-top: var(--rb-sp-4);
+}
+
+.detail__pair {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.detail__meta dt {
+  font-family: var(--rb-font-display);
+  font-size: var(--rb-size-small);
+  text-transform: uppercase;
+  letter-spacing: var(--rb-tracking-label);
+}
+
+.detail__meta dd {
+  margin-top: var(--rb-sp-1);
+  overflow-wrap: anywhere;
+}
+
+.detail__actions {
+  margin-top: var(--rb-sp-4);
+}
+
+/* ---------- classification form ---------- */
+
+.classify {
+  margin-top: var(--rb-sp-4);
+  padding: var(--rb-sp-4);
+  border: var(--rb-border-heavy) solid var(--rb-black);
+  max-width: 640px;
+}
+
+.classify .field:first-of-type {
+  margin-top: 0;
+}
+
+.classify .btn {
+  margin-top: var(--rb-sp-4);
+}
+
 /* ---------- footer ---------- */
 
 .site-footer {

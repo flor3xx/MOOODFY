@@ -1,6 +1,7 @@
 /**
- * MusicBrainz search provider — SERVER ONLY. Do not import this module from a
- * client component: only `import type` for the result shape (erased at build).
+ * MusicBrainz provider — SERVER ONLY (search + single-recording lookup). Do not
+ * import this module from a client component: only `import type` for the result
+ * shape (erased at build).
  *
  * Prototype: public MusicBrainz web service, no API key, but a meaningful
  * User-Agent is mandatory (MUSICBRAINZ_USER_AGENT) and MusicBrainz asks clients
@@ -102,6 +103,88 @@ export async function searchRecordings(options: SearchOptions): Promise<SearchOu
   }
 
   return { ok: true, results };
+}
+
+export type LookupErrorCode =
+  | "invalid_id"
+  | "not_configured"
+  | "not_found"
+  | "timeout"
+  | "provider_error"
+  | "malformed_response";
+
+export type LookupOutcome =
+  | { ok: true; recording: Recording }
+  | { ok: false; code: LookupErrorCode };
+
+/**
+ * Strict MBID validation. MusicBrainz identifiers are RFC 4122 UUIDs; only the
+ * canonical 8-4-4-4-12 hex form (hyphenated or not, any case) is accepted, and
+ * the returned value is re-rendered from hex, so nothing from the caller can
+ * add a path segment or a query parameter to the upstream URL.
+ */
+export function normalizeMbid(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const hex = input.trim().replace(/-/g, "").toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(hex)) return null;
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join("-");
+}
+
+export type LookupOptions = {
+  mbid: unknown;
+  /** Defaults to MUSICBRAINZ_USER_AGENT; injected in tests. */
+  userAgent?: string | null;
+  fetchImpl?: FetchLike;
+  timeoutMs?: number;
+};
+
+/**
+ * Single-recording lookup by MBID, normalized into the same stable `Recording`
+ * shape as search. Provider bodies never leave this function: every failure is
+ * a code from `LookupErrorCode`.
+ */
+export async function lookupRecording(options: LookupOptions): Promise<LookupOutcome> {
+  const mbid = normalizeMbid(options.mbid);
+  if (!mbid) return { ok: false, code: "invalid_id" };
+
+  const userAgent = (options.userAgent ?? process.env.MUSICBRAINZ_USER_AGENT ?? "").trim();
+  if (userAgent.length === 0) return { ok: false, code: "not_configured" };
+
+  const request = new URL(`${ENDPOINT}/${mbid}`);
+  request.searchParams.set("fmt", "json");
+  // Serialized as inc=artist-credits+releases, the documented form.
+  request.searchParams.set("inc", "artist-credits releases");
+
+  let response: Response;
+  try {
+    response = await (options.fetchImpl ?? fetch)(request, {
+      headers: { Accept: "application/json", "User-Agent": userAgent },
+      signal: AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS),
+      cache: "no-store",
+    });
+  } catch (error) {
+    return { ok: false, code: isAbort(error) ? "timeout" : "provider_error" };
+  }
+
+  // A well-formed id that MusicBrainz does not know is a 404, not a failure.
+  if (response.status === 404) return { ok: false, code: "not_found" };
+  if (!response.ok) return { ok: false, code: "provider_error" };
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return { ok: false, code: "malformed_response" };
+  }
+
+  const recording = toRecording(body);
+  return recording ? { ok: true, recording } : { ok: false, code: "malformed_response" };
 }
 
 function toRecording(entry: unknown): Recording | null {

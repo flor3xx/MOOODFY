@@ -1,4 +1,5 @@
 import Form from "next/form";
+import Link from "next/link";
 import {
   loadDimensions,
   type DimensionFallbackReason,
@@ -95,7 +96,9 @@ export default async function Home({ searchParams }: HomeProps) {
                   {outcome.results.map((recording) => (
                     <li key={recording.mbid} className="result">
                       <h3 className="result__title">
-                        <a href={recording.url}>{recording.title}</a>
+                        <Link href={`/songs/${encodeURIComponent(recording.mbid)}`}>
+                          {recording.title}
+                        </Link>
                       </h3>
                       <p className="result__meta">
                         {recording.artists.length > 0
@@ -104,6 +107,11 @@ export default async function Home({ searchParams }: HomeProps) {
                       </p>
                       <p className="result__extra help">
                         {releaseLine(recording.releaseTitle, recording.firstReleaseDate)}
+                      </p>
+                      <p className="result__extra help">
+                        <a href={recording.url} target="_blank" rel="noopener noreferrer">
+                          Scheda su MusicBrainz (nuova scheda)
+                        </a>
                       </p>
                     </li>
                   ))}

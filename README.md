@@ -97,6 +97,28 @@ Nessuna richiesta viene inviata al provider in questo caso.
   in `lib/musicbrainz.ts` (server-only) proprio per rendere quel cambio economico.
 - Nessun evento analytics viene inviato per le ricerche.
 
+## Scheda del brano (`/songs/[mbid]`)
+
+- Il titolo di ogni risultato di ricerca porta a una **scheda interna** `/songs/<mbid>`, non più
+  direttamente a MusicBrainz; accanto resta un link esplicito alla scheda originale
+  (`https://musicbrainz.org/recording/<mbid>`, nuova scheda, `rel="noopener noreferrer"`).
+- La scheda mostra titolo, artista/i, album, prima pubblicazione, MBID e il link canonico. I dati
+  arrivano da `GET /ws/2/recording/<mbid>?fmt=json&inc=artist-credits+releases` tramite lo stesso
+  seam server-only `lib/musicbrainz.ts` (`lookupRecording`), normalizzati nella stessa forma stabile
+  della ricerca. Nessun payload del provider viene salvato o mostrato.
+- **Validazione**: il parametro è accettato solo come UUID/MBID canonico (con o senza trattini, in
+  qualunque caso); la forma canonica viene ricostruita dai soli caratteri esadecimali, quindi non può
+  aggiungere segmenti o parametri alla URL del provider.
+- **Stati**: un MBID malformato viene rifiutato in `proxy.ts` con un **404 reale** prima che React
+  renderizzi (una risposta già in streaming non può più cambiare lo status: vedi la sezione
+  “Status codes” della documentazione Next). Un MBID valido ma sconosciuto mostra la pagina
+  “Brano non trovato” con il tag `noindex` iniettato da Next (soft 404 documentato). Restano distinti
+  gli stati *non configurato*, *timeout*, *errore del provider* e *risposta malformata*.
+- **Onestà dello slice**: la scheda dichiara esplicitamente che classificazione, percentuali della
+  community e link ai servizi di streaming **non sono attivi**; il pulsante di voto è `disabled`,
+  non è dentro un form e non invia nulla.
+- Nessuna scrittura su Supabase e nessun evento analytics.
+
 ## Autenticazione (email + password)
 
 Rotte disponibili:
@@ -183,8 +205,11 @@ sconosciuto, e sconosciuto significa negato.
 `supabase/migrations/` contiene lo schema: `0001` crea `public.dimensions` e `public.dimension_values`
 con i valori approvati delle tre dimensioni (RLS attiva in sola lettura per anon/authenticated);
 `0002` aggiunge catalogo e classificazioni comunitarie; `0003` aggiunge l'indice di copertura della
-chiave esterna composta. Tutte sono idempotenti: si possono riapplicare. Lo schema completo (tracce,
-voti, gamification) è volutamente fuori scope.
+chiave esterna composta; `0004` aggiunge `songs.created_by`, aggiorna la visibilità dei brani e crea la
+funzione atomica `public.classify_song`. Tutte sono idempotenti: si possono riapplicare. Lo schema
+completo (gamification, area amministrativa) è volutamente fuori scope.
+Le migrazioni si applicano solo con il processo di revisione approvato: l'applicazione non applica mai
+schema da sé.
 
 La homepage **legge** la tassonomia da Supabase in sola lettura (`lib/dimensions-server.ts`): due
 `select` limitate (`id,slug,label,sort_order` e `dimension_id,value,sort_order`, con `order` esplicito)
@@ -194,21 +219,49 @@ tassonomia utilizzabile, la pagina ripiega sul vocabolario locale di `lib/dimens
 nello stato (“Da Supabase” oppure “Fallback locale”). Nessun messaggio di errore di Supabase viene
 mostrato o registrato. Nessuna scrittura, nessuna chiave `service_role`.
 
+## Classificazione (primo slice di scrittura)
+
+- Nella scheda del brano un utente **autenticato** sceglie un valore per Mood, Energia e Atmosfera e
+  invia il form (`components/classify-form.tsx` → Server Function `app/songs/[mbid]/actions.ts`).
+  Chi non ha una sessione vede un link ad `/auth/login`, non un voto finto.
+- La Server Function non si fida del browser: rivalida l'MBID con `normalizeMbid`, ricontrolla i tre
+  valori contro il vocabolario approvato (`lib/classification.ts`), **rilegge la registrazione da
+  MusicBrainz** e ignora qualunque titolo/artista inviato dal client, quindi risolve gli id dei valori
+  dalle tabelle pubbliche di riferimento. I guasti diventano messaggi fissi in italiano: nessun errore
+  grezzo arriva in pagina.
+- La scrittura è **una sola chiamata** a `public.classify_song`: importa o riusa il brano
+  (`song_sources` con `provider='musicbrainz'` e URL canonico costruito dall'MBID), lo porta a
+  `community_pending` se era `external`, e inserisce/aggiorna le tre righe di classificazione
+  dell'utente, tutto in una transazione. Il brano rifiutato (`rejected`) non è classificabile.
+- La funzione è `SECURITY DEFINER` **per necessità**: è l'unico punto che scrive
+  `songs`/`song_sources`/`classification_votes`. `authenticated` non ha più grant di scrittura diretti
+  su quelle tabelle (0004 li revoca) e `execute` sulla funzione è revocato da `PUBLIC` e `anon`,
+  concesso solo ad `authenticated`. La funzione impone `set search_path = ''`, pretende `auth.uid()`
+  non nullo, non accetta mai uno `user_id` come argomento e rivalida ogni valore contro le dimensioni.
+- Visibilità: i brani pubblicati restano pubblici; un brano `external`/`community_pending` è visibile
+  a chi lo ha creato e a chi lo ha classificato, mai a chi non ha votato e mai a `anon`.
+- **Fuori da questo slice**: percentuali della community, transizione automatica a
+  `community_validated`, badge, area amministrativa e link ai servizi di streaming. Nessun evento
+  analytics viene inviato per la classificazione.
+
 ## Struttura
 
 ```
 app/                    layout, homepage, globals.css (token RawBlock), loading
 app/api/search/         route GET /api/search (JSON, server-only)
+app/songs/[mbid]/       scheda brano: page, loading, not-found, actions (classify_song)
 app/auth/               pagine login/sign-up, Server Functions, callback e sign-out
-components/             pannello consenso + loader analytics, form di autenticazione
-lib/                    consenso, provider MusicBrainz (server-only), validazione auth,
+components/             pannello consenso + loader analytics, form di autenticazione,
+                        form di classificazione
+lib/                    consenso, provider MusicBrainz (server-only: ricerca + lookup),
+                        validazione auth, validazione/mappatura errori di classificazione,
                         seam Supabase (env, client browser, client server, proxy),
                         dimensioni (vocabolario + mapping puro, lettura Supabase server-only)
-proxy.ts                refresh dei cookie di sessione su / e /auth/* (nessun redirect)
-supabase/migrations/    SQL: dimensioni/valori, catalogo e classificazioni
+proxy.ts                refresh dei cookie di sessione e rifiuto degli MBID malformati (nessun redirect)
+supabase/migrations/    SQL: dimensioni/valori, catalogo e classificazioni, funzione atomica
 ```
 
 ## Fuori scope (prossimi slice)
 
-Filtri e voto su Mood/Energia/Atmosfera, persistenza catalogo e voti, ruoli/area amministrativa,
-gamification, immagini copertina, link ai servizi di streaming.
+Filtri e voto su Mood/Energia/Atmosfera, persistenza catalogo e voti, percentuali della community,
+ruoli/area amministrativa, gamification, immagini copertina, link ai servizi di streaming.

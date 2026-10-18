@@ -125,6 +125,44 @@ function toDimensionId(value: unknown): DimensionId | null {
   return DIMENSION_IDS.find((id) => id === value) ?? null;
 }
 
+/**
+ * (slug -> label -> dimension_values.id) index, used when submitting a
+ * classification: the Server Action resolves the selected labels to database ids
+ * through this, and the RPC re-checks them against the database anyway. Rows
+ * that do not fit are dropped; anything unusable returns null.
+ */
+export function mapDimensionValueIds(
+  dimensionRows: unknown,
+  valueRows: unknown,
+): ReadonlyMap<DimensionId, ReadonlyMap<string, string>> | null {
+  if (!Array.isArray(dimensionRows) || !Array.isArray(valueRows)) return null;
+
+  const slugByUuid = new Map<string, DimensionId>();
+  for (const row of dimensionRows) {
+    if (!isRecord(row)) continue;
+    const id = toDimensionId(row.slug);
+    const uuid = text(row.id);
+    if (!id || !uuid) continue;
+    slugByUuid.set(uuid, id);
+  }
+  if (slugByUuid.size === 0) return null;
+
+  const index = new Map<DimensionId, Map<string, string>>();
+  for (const row of valueRows) {
+    if (!isRecord(row)) continue;
+    const dimensionUuid = text(row.dimension_id);
+    const slug = dimensionUuid ? slugByUuid.get(dimensionUuid) : undefined;
+    const uuid = text(row.id);
+    const label = text(row.value);
+    if (!slug || !uuid || !label) continue;
+    const values = index.get(slug) ?? new Map<string, string>();
+    values.set(label, uuid);
+    index.set(slug, values);
+  }
+
+  return index.size > 0 ? index : null;
+}
+
 function text(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();

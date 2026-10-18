@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DIMENSION_IDS, DIMENSIONS, mapDimensions, type Dimension } from "./dimensions.ts";
+import { DIMENSION_IDS, DIMENSIONS, mapDimensionValueIds, mapDimensions, type Dimension } from "./dimensions.ts";
 
 /** Rows exactly as PostgREST returns them for the approved seed. */
 const DIMENSION_ROWS = [
@@ -160,4 +160,36 @@ test("mapping never throws on hostile input", () => {
   for (const input of hostile) {
     assert.equal(mapDimensions(input, input), null);
   }
+});
+
+test("value ids are indexed by dimension slug and label", () => {
+  const index = mapDimensionValueIds(
+    [
+      { id: "d-mood", slug: "mood" },
+      { id: "d-energia", slug: "energia" },
+      { id: "d-genere", slug: "genere" },
+    ],
+    [
+      { id: "v1", dimension_id: "d-mood", value: "Chill" },
+      { id: "v2", dimension_id: "d-mood", value: "Felice" },
+      { id: "v3", dimension_id: "d-energia", value: "Alta" },
+      { id: "v4", dimension_id: "d-genere", value: "Rock" },
+      { id: "v5", dimension_id: "d-missing", value: "Orfano" },
+      null,
+      { id: "v6", value: "Senza dimensione" },
+    ],
+  );
+  assert.ok(index);
+  assert.equal(index.get("mood")?.get("Chill"), "v1");
+  assert.equal(index.get("mood")?.get("Felice"), "v2");
+  assert.equal(index.get("energia")?.get("Alta"), "v3");
+  assert.deepEqual([...index.keys()].sort(), ["energia", "mood"]);
+  assert.equal(index.get("mood")?.get("Alta"), undefined);
+});
+
+test("an unusable value index returns null", () => {
+  assert.equal(mapDimensionValueIds([], []), null);
+  assert.equal(mapDimensionValueIds(null, []), null);
+  assert.equal(mapDimensionValueIds([{ id: "d", slug: "genere" }], []), null);
+  assert.equal(mapDimensionValueIds([{ id: "d-mood", slug: "mood" }], [{ value: "Chill" }]), null);
 });
