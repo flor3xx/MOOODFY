@@ -63,8 +63,8 @@ export function ClassifyForm({
       ))}
 
       <p className="help" id="classify-help">
-        Un valore per dimensione. Puoi cambiare la scelta quando vuoi: la classificazione precedente
-        viene sostituita.
+        Un valore per dimensione. La classificazione si invia una sola volta e non può essere
+        modificata: dopo l’invio la trovi nella tua lista personale.
       </p>
 
       <SubmitButton />

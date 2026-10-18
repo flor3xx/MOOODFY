@@ -251,6 +251,10 @@ main {
   flex: 1 1 220px;
 }
 
+.search__field--kind {
+  flex: 0 1 200px;
+}
+
 .label {
   display: block;
   margin-bottom: var(--rb-sp-1);
@@ -362,6 +366,12 @@ main {
   padding: 2px 10px;
   font-size: 11px;
   border-color: var(--rb-warning);
+}
+
+/* Machine-readable status token: shown verbatim, not uppercased. */
+.chip--token {
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .chip--success {

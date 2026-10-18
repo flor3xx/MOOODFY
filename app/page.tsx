@@ -7,7 +7,10 @@ import {
 import {
   MAX_QUERY_LENGTH,
   normalizeQuery,
+  normalizeSearchKind,
+  searchArtists,
   searchRecordings,
+  type Artist,
   type SearchErrorCode,
 } from "@/lib/musicbrainz";
 
@@ -16,10 +19,13 @@ type HomeProps = {
 };
 
 export default async function Home({ searchParams }: HomeProps) {
-  const rawQuery = firstString((await searchParams).q);
+  const params = await searchParams;
+  const rawQuery = firstString(params.q);
+  const kind = normalizeSearchKind(firstString(params.kind));
   const check = normalizeQuery(rawQuery);
   // Validation happens here, server-side, before any provider call.
-  const outcome = check.ok ? await searchRecordings({ q: check.query }) : null;
+  const recordings = check.ok && kind === "recording" ? await searchRecordings({ q: check.query }) : null;
+  const artists = check.ok && kind === "artist" ? await searchArtists({ q: check.query }) : null;
   // Public read of the approved vocabulary; falls back to the local list.
   const taxonomy = await loadDimensions();
   const dimensionCount = taxonomy.dimensions.length;
@@ -36,8 +42,8 @@ export default async function Home({ searchParams }: HomeProps) {
       <section id="ricerca" className="block" aria-labelledby="ricerca-title">
         <h2 id="ricerca-title">Ricerca</h2>
         <p className="block__intro">
-          Cerca per titolo, artista o album. I risultati arrivano da MusicBrainz; il titolo di ogni
-          risultato apre la scheda originale.
+          Cerca brani o artisti su MusicBrainz. Le registrazioni aprono la scheda del brano su
+          MOOODFY; gli artisti aprono la pagina dell&apos;artista con le sue registrazioni.
         </p>
 
         <Form className="search" role="search" action="/" aria-labelledby="ricerca-title">
@@ -62,10 +68,28 @@ export default async function Home({ searchParams }: HomeProps) {
                 placeholder="Titolo, artista o album"
               />
             </div>
+            <div className="search__field search__field--kind">
+              <label className="label" htmlFor="kind">
+                Cerca per
+              </label>
+              <select
+                className="input"
+                id="kind"
+                name="kind"
+                defaultValue={kind}
+                aria-describedby="kind-help"
+              >
+                <option value="recording">Registrazioni</option>
+                <option value="artist">Artisti</option>
+              </select>
+            </div>
             <button className="btn btn--primary" type="submit">
               Cerca
             </button>
           </div>
+          <p className="help" id="kind-help">
+            La scelta resta nella URL insieme al testo cercato.
+          </p>
         </Form>
 
         {rawQuery.length === 0 ? null : (
@@ -78,11 +102,44 @@ export default async function Home({ searchParams }: HomeProps) {
               </p>
             )}
 
-            {outcome === null ? null : !outcome.ok ? (
+            {kind === "artist" ? (
+              artists === null ? null : !artists.ok ? (
+                <p className="alert" role="alert">
+                  {errorMessage(artists.code)}
+                </p>
+              ) : artists.results.length === 0 ? (
+                <p className="results__status mono" role="status">
+                  Nessun artista per “{check.ok ? check.query : rawQuery}”. Prova con un altro nome.
+                </p>
+              ) : (
+                <>
+                  <p className="results__status mono" role="status">
+                    {artists.results.length} artisti per “{check.ok ? check.query : rawQuery}”.
+                  </p>
+                  <ul className="results__list">
+                    {artists.results.map((artist) => (
+                      <li key={artist.mbid} className="result">
+                        <h3 className="result__title">
+                          <Link href={`/artists/${encodeURIComponent(artist.mbid)}`}>
+                            {artist.name}
+                          </Link>
+                        </h3>
+                        <p className="result__meta">{artistMeta(artist)}</p>
+                        <p className="result__extra help">
+                          <a href={artist.url} target="_blank" rel="noopener noreferrer">
+                            Scheda su MusicBrainz (nuova scheda)
+                          </a>
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )
+            ) : recordings === null ? null : !recordings.ok ? (
               <p className="alert" role="alert">
-                {errorMessage(outcome.code)}
+                {errorMessage(recordings.code)}
               </p>
-            ) : outcome.results.length === 0 ? (
+            ) : recordings.results.length === 0 ? (
               <p className="results__status mono" role="status">
                 Nessun risultato per “{check.ok ? check.query : rawQuery}”. Prova con un altro
                 titolo, artista o album.
@@ -90,10 +147,10 @@ export default async function Home({ searchParams }: HomeProps) {
             ) : (
               <>
                 <p className="results__status mono" role="status">
-                  {outcome.results.length} risultati per “{check.ok ? check.query : rawQuery}”.
+                  {recordings.results.length} risultati per “{check.ok ? check.query : rawQuery}”.
                 </p>
                 <ul className="results__list">
-                  {outcome.results.map((recording) => (
+                  {recordings.results.map((recording) => (
                     <li key={recording.mbid} className="result">
                       <h3 className="result__title">
                         <Link href={`/songs/${encodeURIComponent(recording.mbid)}`}>
@@ -202,6 +259,14 @@ export default async function Home({ searchParams }: HomeProps) {
 function releaseLine(releaseTitle: string | null, firstReleaseDate: string | null): string {
   const parts = [releaseTitle, firstReleaseDate].filter((part): part is string => part !== null);
   return parts.length > 0 ? parts.join(" — ") : "Album e data non indicati";
+}
+
+/** Type, country and disambiguation, whichever MusicBrainz carries. */
+function artistMeta(artist: Artist): string {
+  const parts = [artist.type, artist.country, artist.disambiguation].filter(
+    (part): part is string => part !== null,
+  );
+  return parts.length > 0 ? parts.join(" — ") : "Dettagli non indicati";
 }
 
 function errorMessage(code: SearchErrorCode): string {

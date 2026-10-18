@@ -44,6 +44,7 @@ export type ClassifyErrorCode =
   | "song_not_found"
   | "provider_unavailable"
   | "song_rejected"
+  | "already_classified"
   | "storage_unavailable";
 
 export type ClassifyFormState = { status: "idle" | "error"; message: string };
@@ -61,6 +62,7 @@ const RPC_TOKENS: Record<string, ClassifyErrorCode> = {
   invalid_title: "invalid_input",
   invalid_value: "invalid_input",
   song_rejected: "song_rejected",
+  already_classified: "already_classified",
 };
 
 /**
@@ -89,6 +91,8 @@ export function classificationMessage(code: ClassifyErrorCode): string {
       return "Non è stato possibile recuperare il brano da MusicBrainz. Riprova tra qualche istante.";
     case "song_rejected":
       return "Questo brano è stato escluso dalla catalogazione e non può essere classificato.";
+    case "already_classified":
+      return "Hai già classificato questo brano. Puoi consultare la tua classificazione nella tua lista personale.";
     case "provider_unavailable":
       return "MusicBrainz non è raggiungibile in questo momento. Riprova tra qualche istante.";
     case "storage_unavailable":

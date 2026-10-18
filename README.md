@@ -1,8 +1,9 @@
 # MOOODFY
 
 Prototipo di scoperta musicale per **Mood**, **Energia** e **Atmosfera**.
-Ricerca testuale su MusicBrainz e autenticazione email/password **implementate**; filtri per
-dimensione, voto, classificazioni e area amministrativa **non sono implementati**.
+Ricerca brani e artisti su MusicBrainz, autenticazione email/password, classificazione di un brano e
+lista delle proprie classificazioni **implementate**; filtri per dimensione, percentuali della
+community e area amministrativa **non sono implementati**.
 
 Linea visiva: [RawBlock](./rawblock-DESIGN.md) (fonte di verità del design, non modificare).
 Stack: Next.js App Router + TypeScript, Supabase/PostgreSQL (Auth + Postgres), MusicBrainz come
@@ -79,17 +80,20 @@ Nessuna richiesta viene inviata al provider in questo caso.
 
 ## Ricerca
 
-- `GET /api/search?q=<testo>` — JSON pubblico usato dalla UI e dai client futuri.
+- `GET /api/search?q=<testo>&kind=recording|artist` — JSON pubblico usato dalla UI e dai client
+  futuri. `kind` è opzionale e qualunque valore diverso da `artist` significa `recording` (default).
   Risposte: `{"ok":true,"results":[...]}` oppure `{"ok":false,"code":"..."}` con
   `400 invalid_query`, `503 not_configured`, `502 provider_error`/`malformed_response`, `504 timeout`.
   La ricerca **non richiede accesso**: le rotte pubbliche restano pubbliche anche con l'autenticazione.
-- La homepage invia la ricerca via form (`GET /?q=...`), quindi la query resta nell'URL ed è
-  condividibile; i risultati sono renderizzati lato server, senza stato client.
-- La validazione (lunghezza 1–100 caratteri, trim, spazi normalizzati) avviene **sempre** lato
-  server, anche per le query costruite a mano nell'URL.
+- La homepage invia la ricerca via form (`GET /?q=...&kind=...`), quindi testo e modalità restano
+  nell'URL e sono condivisibili; i risultati sono renderizzati lato server, senza stato client. Il
+  controllo di modalità è un `select` nativo con etichetta reale (“Cerca per”).
+- La validazione (lunghezza 1–100 caratteri, trim, spazi normalizzati; `kind` validato lato server)
+  avviene **sempre** lato server, anche per le query costruite a mano nell'URL.
 - Campi normalizzati per la UI: MBID della recording, titolo, artisti, titolo del release/group,
-  prima data di pubblicazione e URL canonico `https://musicbrainz.org/recording/<mbid>`.
-  Nessun salvataggio: i risultati vivono solo nella risposta.
+  prima data di pubblicazione e URL canonico `https://musicbrainz.org/recording/<mbid>`. Per gli
+  artisti: MBID, nome, disambiguazione/paese/tipo **solo se presenti**, URL canonico
+  `https://musicbrainz.org/artist/<mbid>`. Nessun salvataggio: i risultati vivono solo nella risposta.
 - **Limite del prototipo:** MusicBrainz chiede circa **una richiesta al secondo** per client e non
   usiamo un dataset locale né caching. Non usare questa ricerca in produzione commerciale: il
   passaggio previsto è un dataset core CC0 in locale o un accordo approvato con MetaBrainz
@@ -97,15 +101,35 @@ Nessuna richiesta viene inviata al provider in questo caso.
   in `lib/musicbrainz.ts` (server-only) proprio per rendere quel cambio economico.
 - Nessun evento analytics viene inviato per le ricerche.
 
+## Pagina artista (`/artists/[mbid]`)
+
+- Accanto alla ricerca per registrazioni c'è una **ricerca per artisti** (`kind=artist`); ogni
+  risultato apre la pagina interna dell'artista.
+- La pagina legge i metadati dell'artista (`lookupArtist`) e la **prima pagina** delle sue
+  registrazioni (browse documentato `GET /ws/2/recording?artist=<mbid>`, massimo 50, nessuna
+  paginazione in questo slice) tramite lo stesso seam server-only `lib/musicbrainz.ts`.
+- Ogni registrazione porta alla scheda interna `/songs/<mbid>`; resta il link esplicito alla scheda
+  MusicBrainz dell'artista.
+- **Validazione**: MBID canonico obbligatorio, come per i brani. Uno malformato è un **404 reale** da
+  `proxy.ts` prima del render; un MBID valido ma sconosciuto mostra la pagina “Artista non trovato”.
+  Restano distinti gli stati *non configurato*, *timeout*, *errore del provider* e *risposta
+  malformata* (anche per la sola lista delle registrazioni).
+
+
 ## Scheda del brano (`/songs/[mbid]`)
 
 - Il titolo di ogni risultato di ricerca porta a una **scheda interna** `/songs/<mbid>`, non più
   direttamente a MusicBrainz; accanto resta un link esplicito alla scheda originale
   (`https://musicbrainz.org/recording/<mbid>`, nuova scheda, `rel="noopener noreferrer"`).
 - La scheda mostra titolo, artista/i, album, prima pubblicazione, MBID e il link canonico. I dati
-  arrivano da `GET /ws/2/recording/<mbid>?fmt=json&inc=artist-credits+releases` tramite lo stesso
-  seam server-only `lib/musicbrainz.ts` (`lookupRecording`), normalizzati nella stessa forma stabile
-  della ricerca. Nessun payload del provider viene salvato o mostrato.
+  arrivano da `GET /ws/2/recording/<mbid>?fmt=json&inc=artist-credits+releases+url-rels` tramite lo
+  stesso seam server-only `lib/musicbrainz.ts` (`lookupRecording`), normalizzati nella stessa forma
+  stabile della ricerca. Nessun payload del provider viene salvato o mostrato.
+- **Dove ascoltarlo**: la sezione “Ascolta” mostra Spotify e Apple Music. Se MusicBrainz espone un
+  link diretto (`url-rels`, riconosciuto per hostname e solo su `https`) viene etichettato
+  **“Ascolta su …”**; altrimenti si genera in modo deterministico una URL di ricerca con titolo e
+  artista e la si etichetta **“Cerca su …”**, dichiarando che è una ricerca. Le URL si costruiscono
+  con `URL`/`URLSearchParams`, mai con stringhe HTML.
 - **Validazione**: il parametro è accettato solo come UUID/MBID canonico (con o senza trattini, in
   qualunque caso); la forma canonica viene ricostruita dai soli caratteri esadecimali, quindi non può
   aggiungere segmenti o parametri alla URL del provider.
@@ -114,10 +138,9 @@ Nessuna richiesta viene inviata al provider in questo caso.
   “Status codes” della documentazione Next). Un MBID valido ma sconosciuto mostra la pagina
   “Brano non trovato” con il tag `noindex` iniettato da Next (soft 404 documentato). Restano distinti
   gli stati *non configurato*, *timeout*, *errore del provider* e *risposta malformata*.
-- **Onestà dello slice**: la scheda dichiara esplicitamente che classificazione, percentuali della
-  community e link ai servizi di streaming **non sono attivi**; il pulsante di voto è `disabled`,
-  non è dentro un form e non invia nulla.
-- Nessuna scrittura su Supabase e nessun evento analytics.
+- **Onestà dello slice**: la scheda dichiara esplicitamente che le percentuali della community non
+  sono ancora attive; i link di ascolto sono reali (diretti o di ricerca, etichettati come tali).
+- Nessuna scrittura su Supabase (a parte la classificazione) e nessun evento analytics.
 
 ## Autenticazione (email + password)
 
@@ -139,9 +162,11 @@ Come è costruita:
   (`required`, `minLength`, `type=email`) sono solo un'anticipazione lato browser.
 - La sessione vive in cookie (`sb-<ref>-auth-token`) scritti dal client server-side
   (`lib/supabase/server.ts`, creato per richiesta con `cookies()`).
-- `proxy.ts` (root, Next 16) **rinfresca soltanto** la sessione sui percorsi `/` e `/auth/*` con
-  `getClaims()`, applicando gli header `Cache-Control`/`Expires`/`Pragma` al response. Non
-  reindirizza e non autorizza nulla: le pagine pubbliche restano pubbliche.
+- `proxy.ts` (root, Next 16) **rinfresca** la sessione sui percorsi `/`, `/auth/*`, `/songs/*`,
+  `/artists/*` e `/account/*` con `getClaims()`, applicando gli header `Cache-Control`/`Expires`/`Pragma`
+  al response. È anche l'unico punto che **reindirizza**, e solo per l'area privata: un visitatore
+  senza sessione su `/account/*` riceve un 307 verso `/auth/login`. Le altre pagine pubbliche restano
+  pubbliche.
 - Le identità si verificano sempre con `getClaims()` (mai `getSession()`, che si fida del cookie).
   Un cookie manomesso non produce alcuno stato autenticato; una risposta non viene mai messa in
   cache insieme ai cookie di sessione.
@@ -220,7 +245,7 @@ Il comportamento dipende dalla configurazione del progetto (Dashboard → Authen
 | `npm start` | Avvia la build di produzione |
 | `npm run lint` | ESLint (config Next flat) |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Test di comportamento (consenso, provider ricerca, validazione auth), `node --test` |
+| `npm test` | Test di comportamento (consenso, provider MusicBrainz ricerca/lookup/artisti/link, validazione auth, classificazione, raggruppamento classificazioni), `node --test` |
 
 ## Analytics e consenso
 
@@ -285,24 +310,47 @@ mostrato o registrato. Nessuna scrittura, nessuna chiave `service_role`.
   `community_validated`, badge, area amministrativa e link ai servizi di streaming. Nessun evento
   analytics viene inviato per la classificazione.
 
+## Le mie classificazioni (`/account/classifications`)
+
+- Pagina privata: si apre solo con **claims verificati** che contengono un id utente, altrimenti il
+  visitatore è reindirizzato a `/auth/login`. Il redirect avviene in `proxy.ts` (307 reale) perché un
+  redirect lanciato dentro un Server Component in streaming non può più cambiare lo status; la pagina
+  ricontrolla comunque i claims.
+- La lettura usa il **client server per richiesta** e la RLS proprietaria (`classification_votes_select_own`):
+  tornano solo le righe dell'utente. La query è una prima pagina limitata di voti, più letture
+  limitate di titolo/stato del brano, fonte MusicBrainz e etichette di dimensione/valore. Nessun id
+  utente, email o voto di altri può comparire.
+- La lista raggruppa le **tre dimensioni per brano** (Mood/Energia/Atmosfera), mostra lo stato
+  (`community_pending` ecc.) come token leggibile e collega a `/songs/<mbid>` quando esiste una fonte
+  MusicBrainz valida.
+- Stati gestiti: nessuna classificazione, lettura non riuscita e righe mancanti/malformate (le righe
+  non utilizzabili vengono scartate, mai mostrate come errore grezzo). Nessun messaggio Supabase
+  grezzo, nessun evento analytics.
+- Il link “Le mie classificazioni” compare nella navigazione solo per chi ha una sessione.
+
+
 ## Struttura
 
 ```
 app/                    layout, homepage, globals.css (token RawBlock), loading
-app/api/search/         route GET /api/search (JSON, server-only)
+app/api/search/         route GET /api/search (JSON, server-only; kind=recording|artist)
 app/songs/[mbid]/       scheda brano: page, loading, not-found, actions (classify_song)
+app/artists/[mbid]/     pagina artista: page, loading, not-found (metadati + registrazioni)
+app/account/classifications/  pagina privata “Le mie classificazioni” (+ loading)
 app/auth/               pagine login/sign-up, Server Functions, conferma (confirm), callback e sign-out
 components/             pannello consenso + loader analytics, form di autenticazione,
                         form di classificazione
-lib/                    consenso, provider MusicBrainz (server-only: ricerca + lookup),
-                        validazione auth, validazione/mappatura errori di classificazione,
+lib/                    consenso, provider MusicBrainz (server-only: ricerca registrazioni/artisti,
+                        lookup, url-rels → link provider), validazione auth,
+                        validazione/mappatura errori di classificazione,
+                        classificazioni dell'utente (mapping puro + lettura server-only),
                         seam Supabase (env, client browser, client server, proxy),
                         dimensioni (vocabolario + mapping puro, lettura Supabase server-only)
-proxy.ts                refresh dei cookie di sessione e rifiuto degli MBID malformati (nessun redirect)
+proxy.ts                refresh dei cookie di sessione, gate di /account/* e rifiuto degli MBID malformati
 supabase/migrations/    SQL: dimensioni/valori, catalogo e classificazioni, funzione atomica
 ```
 
 ## Fuori scope (prossimi slice)
 
-Filtri e voto su Mood/Energia/Atmosfera, persistenza catalogo e voti, percentuali della community,
-ruoli/area amministrativa, gamification, immagini copertina, link ai servizi di streaming.
+Filtri per dimensione, transizione a `community_validated` e percentuali della community,
+ruoli/area amministrativa, gamification, immagini copertina, paginazione della pagina artista.

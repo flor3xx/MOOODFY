@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
-import { searchRecordings, type SearchErrorCode } from "@/lib/musicbrainz";
+import {
+  normalizeSearchKind,
+  searchArtists,
+  searchRecordings,
+  type SearchErrorCode,
+} from "@/lib/musicbrainz";
 
 /**
- * Public JSON seam for search: GET /api/search?q=...
+ * Public JSON seam for search: GET /api/search?q=...&kind=recording|artist
  * Prototype limits are documented in the README: results come from the public
  * MusicBrainz web service, rate-limited to about one request per second, so no
  * caching layer is added here and no upstream body is ever forwarded.
@@ -21,8 +26,12 @@ const STATUS: Record<SearchErrorCode, number> = {
 const NO_STORE = { "Cache-Control": "no-store" };
 
 export async function GET(request: Request) {
-  const query = new URL(request.url).searchParams.get("q");
-  const outcome = await searchRecordings({ q: query });
+  const params = new URL(request.url).searchParams;
+  const kind = normalizeSearchKind(params.get("kind"));
+  const outcome =
+    kind === "artist"
+      ? await searchArtists({ q: params.get("q") })
+      : await searchRecordings({ q: params.get("q") });
 
   if (!outcome.ok) {
     return NextResponse.json({ ok: false, code: outcome.code }, { status: STATUS[outcome.code], headers: NO_STORE });

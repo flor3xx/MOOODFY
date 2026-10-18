@@ -5,50 +5,71 @@ import { updateSession } from "@/lib/supabase/proxy";
 /**
  * Two jobs, one proxy:
  *
- * 1. Reject a malformed song MBID before React renders. `notFound()` inside a
- *    streamed response cannot change the status code any more (the shell and the
- *    loading UI have already been sent as 200), so an invalid identifier can only
- *    become a real HTTP 404 here, before the page renders. See
- *    node_modules/next/dist/docs/01-app/02-guides/streaming.md ("Status codes").
+ * 1. Reject a malformed song or artist MBID before React renders. `notFound()`
+ *    inside a streamed response cannot change the status code any more (the
+ *    shell and the loading UI have already been sent as 200), so an invalid
+ *    identifier can only become a real HTTP 404 here, before the page renders.
+ *    See node_modules/next/dist/docs/01-app/02-guides/streaming.md ("Status
+ *    codes").
  * 2. Refresh Supabase session cookies for the routes that read the session.
  *
  * It never redirects: every page of this prototype stays public.
  */
 
-/** Exactly one segment below /songs (the detail route), with an optional slash. */
+/** Exactly one segment below /songs or /artists (the detail routes). */
 const SONG_DETAIL_PATH = /^\/songs\/([^/]+)\/?$/;
+const ARTIST_DETAIL_PATH = /^\/artists\/([^/]+)\/?$/;
+/** The private account area. */
+const ACCOUNT_PATH = /^\/account(\/.*)?$/;
 
 export async function proxy(request: NextRequest) {
-  const match = SONG_DETAIL_PATH.exec(request.nextUrl.pathname);
+  const pathname = request.nextUrl.pathname;
 
-  if (match) {
-    let mbid: string;
-    try {
-      mbid = decodeURIComponent(match[1]);
-    } catch {
-      mbid = "";
-    }
-    if (!normalizeMbid(mbid)) return invalidMbidResponse();
+  if (SONG_DETAIL_PATH.test(pathname)) {
+    const mbid = decodeSegment(SONG_DETAIL_PATH.exec(pathname)?.[1]);
+    if (!normalizeMbid(mbid)) return invalidMbidResponse("Brano non trovato", "brano");
     // Valid shape: nothing to refresh here, the detail page reads no session.
     return NextResponse.next();
   }
 
-  return updateSession(request);
+  if (ARTIST_DETAIL_PATH.test(pathname)) {
+    const mbid = decodeSegment(ARTIST_DETAIL_PATH.exec(pathname)?.[1]);
+    if (!normalizeMbid(mbid)) return invalidMbidResponse("Artista non trovato", "artista");
+    return NextResponse.next();
+  }
+
+  const { response, userId } = await updateSession(request);
+
+  // The account area is the one private route: a signed-out visitor is sent to
+  // a fixed internal login path here, before React renders (a redirect thrown
+  // inside a streamed Server Component cannot change the status code any more).
+  if (ACCOUNT_PATH.test(pathname) && !userId) {
+    return NextResponse.redirect(new URL("/auth/login", request.url), 307);
+  }
+
+  return response;
+}
+
+function decodeSegment(segment: string | undefined): string {
+  try {
+    return decodeURIComponent(segment ?? "");
+  } catch {
+    return "";
+  }
 }
 
 export const config = {
   // Narrow on purpose. Server Functions of a route are POSTs to that same
   // route, so /auth/* coverage also covers the login and sign-up actions.
-  matcher: ["/", "/auth/:path*", "/songs/:path*"],
+  matcher: ["/", "/auth/:path*", "/songs/:path*", "/artists/:path*", "/account/:path*"],
 };
 
 /**
  * Pre-React fallback, so the RawBlock tokens/fonts of app/globals.css are not
  * available: plain black-on-white, square, blue link only. The styled
- * not-found page (app/songs/[mbid]/not-found.tsx) covers everything that does
- * get to render.
+ * not-found pages cover everything that does get to render.
  */
-function invalidMbidResponse() {
+function invalidMbidResponse(title: string, subject: string) {
   return new NextResponse(
     `<!doctype html>
 <html lang="it">
@@ -56,7 +77,7 @@ function invalidMbidResponse() {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
-    <title>Brano non trovato — MOOODFY</title>
+    <title>${title} — MOOODFY</title>
     <style>
       body { margin: 0; background: #ffffff; color: #000000; font-family: Arial, sans-serif; line-height: 1.6; }
       main { max-width: 1100px; margin: 0 auto; padding: 24px; }
@@ -66,8 +87,8 @@ function invalidMbidResponse() {
   </head>
   <body>
     <main>
-      <h1>Brano non trovato</h1>
-      <p>L'identificativo nella URL non &egrave; un MBID valido.</p>
+      <h1>${title}</h1>
+      <p>L'identificativo nella URL non &egrave; un MBID valido per questo ${subject}.</p>
       <p><a href="/">&larr; Torna alla ricerca</a></p>
     </main>
   </body>

@@ -6,9 +6,20 @@ import {
   CLASSIFY_SAVED_VALUE,
 } from "@/lib/classification";
 import { loadDimensions } from "@/lib/dimensions-server";
-import { lookupRecording, type LookupErrorCode } from "@/lib/musicbrainz";
+import {
+  lookupRecording,
+  streamingLinks,
+  type LookupErrorCode,
+  type ProviderName,
+} from "@/lib/musicbrainz";
 import { getServerClaims } from "@/lib/supabase/server";
 import { classifySongAction } from "./actions";
+
+/** UI labels for the two providers; the URL never comes from these strings. */
+const PROVIDER_LABELS: Record<ProviderName, string> = {
+  spotify: "Spotify",
+  apple_music: "Apple Music",
+};
 
 type SongPageProps = {
   params: Promise<{ mbid: string }>;
@@ -43,6 +54,7 @@ export default async function SongPage({ params, searchParams }: SongPageProps) 
   }
 
   const recording = outcome.recording;
+  const links = streamingLinks(recording);
 
   // Verified claims, never the cookie alone; only the signed-in view gets a form.
   const claims = await getServerClaims();
@@ -90,6 +102,34 @@ export default async function SongPage({ params, searchParams }: SongPageProps) 
         </p>
       </section>
 
+      <section className="block" aria-labelledby="ascolta-title">
+        <h2 id="ascolta-title">Ascolta</h2>
+        <p className="block__intro">
+          Link diretti quando MusicBrainz li espone; altrimenti si apre la ricerca del servizio, con
+          titolo e artista del brano.
+        </p>
+        <ul className="results__list">
+          {links.map((link) => (
+            <li key={link.provider} className="result">
+              <p>
+                <a href={link.url} target="_blank" rel="noopener noreferrer">
+                  {link.direct
+                    ? `Ascolta su ${PROVIDER_LABELS[link.provider]}`
+                    : `Cerca su ${PROVIDER_LABELS[link.provider]}`}{" "}
+                  (nuova scheda)
+                </a>
+              </p>
+              {link.direct ? null : (
+                <p className="help">
+                  Nessun link diretto su MusicBrainz: si apre la ricerca di{" "}
+                  {PROVIDER_LABELS[link.provider]}.
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+
       <section className="block" aria-labelledby="classificazione-title">
         <h2 id="classificazione-title">Classificazione</h2>
 
@@ -102,8 +142,8 @@ export default async function SongPage({ params, searchParams }: SongPageProps) 
 
         <p className="block__intro">
           Un valore per dimensione: come ti fa sentire il brano (Mood), quanto spinge (Energia) e in
-          che ambiente vive (Atmosfera). La scelta si può cambiare: la classificazione precedente
-          viene sostituita.
+          che ambiente vive (Atmosfera). L’invio è unico e definitivo: non si può modificare, ma
+          puoi consultare la tua classificazione nella tua lista personale.
         </p>
 
         {signedIn && taxonomy ? (
@@ -116,7 +156,7 @@ export default async function SongPage({ params, searchParams }: SongPageProps) 
           <>
             <p>
               Per classificare questo brano serve un account: il voto è legato alla tua utenza e
-              resta modificabile solo da te.
+              non può essere modificato dopo l’invio.
             </p>
             <p className="detail__actions">
               <Link className="btn btn--primary" href="/auth/login">
@@ -130,9 +170,6 @@ export default async function SongPage({ params, searchParams }: SongPageProps) 
           <li>
             <span className="chip chip--status">Prossimo slice</span> Percentuali della community:
             il brano non è ancora validato.
-          </li>
-          <li>
-            <span className="chip chip--status">Prossimo slice</span> Link ai servizi di streaming.
           </li>
         </ul>
       </section>

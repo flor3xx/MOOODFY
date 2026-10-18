@@ -83,8 +83,20 @@ test("database tokens map to fixed categories", () => {
   assert.equal(mapRpcError("invalid_title"), "invalid_input");
   assert.equal(mapRpcError("invalid_value"), "invalid_input");
   assert.equal(mapRpcError("song_rejected"), "song_rejected");
+  assert.equal(mapRpcError("already_classified"), "already_classified");
   assert.equal(mapRpcError("  invalid_value  "), "invalid_input");
   assert.equal(mapRpcError("invalid_value\nCONTEXT: ..."), "invalid_input");
+});
+
+test("the immutability token maps to its own category and message", () => {
+  // A second submission of the same song is refused by the database; the
+  // message must point the user at their personal list instead of retrying.
+  assert.equal(mapRpcError("already_classified"), "already_classified");
+  assert.equal(mapRpcError("already_classified\nCONTEXT: ..."), "already_classified");
+  assert.equal(
+    classificationMessage("already_classified"),
+    "Hai già classificato questo brano. Puoi consultare la tua classificazione nella tua lista personale.",
+  );
 });
 
 test("unknown or hostile error text never passes through", () => {
@@ -111,6 +123,7 @@ test("every error code has a fixed, non-empty Italian message", () => {
     "song_not_found",
     "provider_unavailable",
     "song_rejected",
+    "already_classified",
     "storage_unavailable",
   ];
   const messages = codes.map(classificationMessage);

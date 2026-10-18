@@ -65,6 +65,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                       <span className="mono">{email}</span>
                     </li>
                     <li>
+                      <Link href="/account/classifications">Le mie classificazioni</Link>
+                    </li>
+                    <li>
                       <form action="/auth/sign-out" method="post">
                         <button className="link-button" type="submit">
                           Esci
