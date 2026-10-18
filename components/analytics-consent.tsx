@@ -51,7 +51,7 @@ function safeStorage(): Storage | null {
 const clientConsent = () => readConsent(safeStorage());
 const serverConsent = () => null;
 
-export function AnalyticsConsent() {
+export function AnalyticsConsent({ enabled }: { enabled: boolean }) {
   const stored = useSyncExternalStore(subscribeToConsent, clientConsent, serverConsent);
   const [decided, setDecided] = useState<ConsentChoice | null>(null);
   const [reopened, setReopened] = useState(false);
@@ -92,7 +92,7 @@ export function AnalyticsConsent() {
 
   return (
     <>
-      {shouldLoadAnalytics(choice) ? <Analytics mode="production" /> : null}
+      {enabled && shouldLoadAnalytics(choice) ? <Analytics mode="production" /> : null}
 
       {visible ? (
         <section

@@ -232,6 +232,9 @@ sconosciuto, e sconosciuto significa negato.
 - Il componente `<Analytics mode="production" />` viene montato **solo** dopo un consenso
   esplicito, quindi lo script non è presente nell'HTML iniziale e non c'è disallineamento di
   idratazione (lo stato viene letto via `useSyncExternalStore` con snapshot server “nessuna scelta”).
+- In sviluppo locale o su hosting diverso da Vercel il loader resta disattivato, così non viene
+  richiesto `/_vercel/insights/script.js` fuori dalla piattaforma che lo serve. Su Vercel resta
+  necessario il consenso esplicito.
 - Nessun evento custom è inviato in questo slice; nessuna ricerca, email, nickname o URL di
   amministrazione viene inviata. Le pagine di autenticazione non inviano eventi: email e password
   non possono finire in Analytics.

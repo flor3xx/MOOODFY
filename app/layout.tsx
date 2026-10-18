@@ -107,7 +107,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </div>
         </footer>
 
-        <AnalyticsConsent />
+        <AnalyticsConsent enabled={process.env.VERCEL === "1"} />
       </body>
     </html>
   );
